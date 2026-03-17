@@ -3,10 +3,17 @@ const generateToken = require("../utils/generateToken");
 
 const register = async (req, res) => {
   try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ message: "Invalid or missing request body. Ensure Content-Type: application/json" });
+    }
     const { email, password, role = 'user' } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    if (!['user', 'admin'].includes(role)) {
+      return res.status(400).json({ message: "Invalid role. Must be 'user' or 'admin'" });
     }
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
@@ -33,6 +40,9 @@ const register = async (req, res) => {
 
 const login = async (req, res) => {
   try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ message: "Invalid or missing request body. Ensure Content-Type: application/json" });
+    }
     const { email, password } = req.body;
 
     if (!email || !password) {

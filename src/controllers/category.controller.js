@@ -2,6 +2,9 @@ const Category = require("../models/Category");
 
 const createCategory = async (req, res) => {
   try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ message: "Invalid or missing request body. Ensure Content-Type: application/json and valid JSON body." });
+    }
     const { name, description } = req.body;
 
     if (!name) {

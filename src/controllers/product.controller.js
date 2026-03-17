@@ -26,6 +26,9 @@ const uploadImageToCloudinary = async (fileBuffer) => {
 
 const createProduct = async (req, res) => {
   try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ message: "Invalid or missing request body. Ensure Content-Type: application/json or multipart/form-data for file uploads" });
+    }
     const { name, description, category, supplier, barcode, quantity, lowStockThreshold, expiryDate, price } = req.body;
     const imageFile = req.file;
 
