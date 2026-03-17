@@ -1,5 +1,4 @@
 const Product = require("../models/Product");
-const InventoryLog = require("../models/InventoryLog");
 const { cloudinary, ensureCloudinaryConfig } = require("../config/cloudinary");
 
 const uploadImageToCloudinary = async (fileBuffer) => {
@@ -17,7 +16,7 @@ const uploadImageToCloudinary = async (fileBuffer) => {
           return;
         }
         resolve(result);
-      }
+      },
     );
 
     stream.end(fileBuffer);
@@ -26,45 +25,31 @@ const uploadImageToCloudinary = async (fileBuffer) => {
 
 const createProduct = async (req, res) => {
   try {
-    const { name, description, category, supplier, barcode, quantity, lowStockThreshold, expiryDate, price } = req.body;
+    const { name, price, barcode, expiryDate, category } = req.body;
     const imageFile = req.file;
 
-    if (!name || !category || !supplier || quantity === undefined || !price) {
-      return res.status(400).json({ message: "Name, category, supplier, quantity, and price are required" });
+    if (!name || !barcode || !expiryDate || !category || !imageFile) {
+      return res.status(400).json({ message: "Missing required product fields" });
     }
 
-    if (barcode) {
-      const existingProduct = await Product.findOne({ barcode });
-      if (existingProduct) {
-        return res.status(409).json({ message: "Product with this barcode already exists" });
-      }
+    const parsedPrice = Number(price);
+    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      return res.status(400).json({ message: "Price must be a valid non-negative number" });
     }
 
-    let imageUrl = null;
-    if (imageFile) {
-      const uploadResult = await uploadImageToCloudinary(imageFile.buffer);
-      imageUrl = uploadResult.secure_url;
-    }
+    const uploadResult = await uploadImageToCloudinary(imageFile.buffer);
 
     const product = await Product.create({
       name,
-      description,
-      category,
-      supplier,
+      price: parsedPrice,
       barcode,
-      quantity,
-      lowStockThreshold: lowStockThreshold || 10,
       expiryDate,
-      price,
-      imageUrl,
+      imageUrl: uploadResult.secure_url,
+      category,
+      quantity: 0,
     });
 
-    await product.populate(["category", "supplier"]);
-
-    return res.status(201).json({
-      message: "Product created successfully",
-      product,
-    });
+    return res.status(201).json({ message: "Product created", product });
   } catch (error) {
     if (error?.code === 11000) {
       return res.status(409).json({ message: "Product barcode already exists" });
@@ -73,14 +58,10 @@ const createProduct = async (req, res) => {
   }
 };
 
-const getAllProducts = async (req, res) => {
+const getAllProducts = async (_req, res) => {
   try {
-    const products = await Product.find().populate(["category", "supplier"]).sort({ createdAt: -1 });
-
-    return res.status(200).json({
-      message: "Products fetched successfully",
-      products,
-    });
+    const products = await Product.find().sort({ createdAt: -1 });
+    return res.status(200).json({ products });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -89,16 +70,12 @@ const getAllProducts = async (req, res) => {
 const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-
-    const product = await Product.findById(id).populate(["category", "supplier"]);
+    const product = await Product.findById(id);
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    return res.status(200).json({
-      message: "Product fetched successfully",
-      product,
-    });
+    return res.status(200).json({ product });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -107,33 +84,38 @@ const getProductById = async (req, res) => {
 const updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, quantity, lowStockThreshold, expiryDate, price } = req.body;
+    const { name, price, barcode, expiryDate, imageUrl, category } = req.body;
     const imageFile = req.file;
 
-    const product = await Product.findById(id);
+    const parsedPrice = Number(price);
+    if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+      return res.status(400).json({ message: "Price must be a valid non-negative number" });
+    }
+
+    let nextImageUrl = imageUrl;
+    if (imageFile) {
+      const uploadResult = await uploadImageToCloudinary(imageFile.buffer);
+      nextImageUrl = uploadResult.secure_url;
+    }
+
+    const product = await Product.findByIdAndUpdate(
+      id,
+      {
+        name,
+        price: parsedPrice,
+        barcode,
+        expiryDate,
+        imageUrl: nextImageUrl,
+        category,
+      },
+      { new: true, runValidators: true },
+    );
+
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    if (name) product.name = name;
-    if (description) product.description = description;
-    if (quantity !== undefined) product.quantity = quantity;
-    if (lowStockThreshold !== undefined) product.lowStockThreshold = lowStockThreshold;
-    if (expiryDate) product.expiryDate = expiryDate;
-    if (price) product.price = price;
-
-    if (imageFile) {
-      const uploadResult = await uploadImageToCloudinary(imageFile.buffer);
-      product.imageUrl = uploadResult.secure_url;
-    }
-
-    await product.save();
-    await product.populate(["category", "supplier"]);
-
-    return res.status(200).json({
-      message: "Product updated successfully",
-      product,
-    });
+    return res.status(200).json({ message: "Product updated", product });
   } catch (error) {
     if (error?.code === 11000) {
       return res.status(409).json({ message: "Product barcode already exists" });
@@ -145,31 +127,25 @@ const updateProduct = async (req, res) => {
 const deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
-
     const product = await Product.findByIdAndDelete(id);
+
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    return res.status(200).json({
-      message: "Product deleted successfully",
-      product,
-    });
+    return res.status(200).json({ message: "Product deleted" });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
 };
 
-const getLowStockProducts = async (req, res) => {
+const getLowStockProducts = async (_req, res) => {
   try {
     const products = await Product.find({
       $expr: { $lte: ["$quantity", "$lowStockThreshold"] },
-    }).populate(["category", "supplier"]);
+    }).sort({ createdAt: -1 });
 
-    return res.status(200).json({
-      message: "Low stock products fetched successfully",
-      products,
-    });
+    return res.status(200).json({ products });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -178,16 +154,13 @@ const getLowStockProducts = async (req, res) => {
 const getProductByBarcode = async (req, res) => {
   try {
     const { barcode } = req.params;
+    const product = await Product.findOne({ barcode });
 
-    const product = await Product.findOne({ barcode }).populate(["category", "supplier"]);
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    return res.status(200).json({
-      message: "Product fetched successfully",
-      product,
-    });
+    return res.status(200).json({ product });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -196,10 +169,15 @@ const getProductByBarcode = async (req, res) => {
 const updateStock = async (req, res) => {
   try {
     const { id } = req.params;
-    const { action, quantity, reason } = req.body;
+    const { action, quantity } = req.body;
 
     if (!action || quantity === undefined) {
       return res.status(400).json({ message: "Action and quantity are required" });
+    }
+
+    const parsedQuantity = Number(quantity);
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity < 0) {
+      return res.status(400).json({ message: "Quantity must be a valid non-negative number" });
     }
 
     const product = await Product.findById(id);
@@ -215,31 +193,20 @@ const updateStock = async (req, res) => {
     const previousQuantity = product.quantity;
 
     if (action === "added") {
-      product.quantity += quantity;
+      product.quantity += parsedQuantity;
     } else if (action === "removed" || action === "sold") {
-      if (product.quantity < quantity) {
+      if (product.quantity < parsedQuantity) {
         return res.status(400).json({ message: "Insufficient stock" });
       }
-      product.quantity -= quantity;
+      product.quantity -= parsedQuantity;
     } else if (action === "adjusted") {
-      product.quantity = quantity;
+      product.quantity = parsedQuantity;
     }
 
     await product.save();
 
-    // Log the inventory change
-    await InventoryLog.create({
-      product: id,
-      action,
-      quantity,
-      reason: reason || "",
-      performedBy: req.user._id,
-    });
-
-    await product.populate(["category", "supplier"]);
-
     return res.status(200).json({
-      message: "Stock updated successfully",
+      message: "Stock updated",
       product,
       previousQuantity,
     });

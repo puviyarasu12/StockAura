@@ -7,18 +7,14 @@ const productSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    description: {
+    category: {
       type: String,
       trim: true,
-    },
-    category: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
       required: true,
     },
-    supplier: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Supplier",
+    imageUrl: {
+      type: String,
+      trim: true,
       required: true,
     },
     imageUrl: {
@@ -33,6 +29,7 @@ const productSchema = new mongoose.Schema(
     quantity: {
       type: Number,
       required: true,
+      default: 0,
       min: 0,
       default: 0,
     },
@@ -55,7 +52,6 @@ const productSchema = new mongoose.Schema(
   }
 );
 
-// Virtual for low stock
 productSchema.virtual("isLowStock").get(function () {
   return this.quantity <= this.lowStockThreshold;
 });
