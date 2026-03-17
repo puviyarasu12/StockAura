@@ -21,15 +21,20 @@ const productSchema = new mongoose.Schema(
       ref: "Supplier",
       required: true,
     },
+    imageUrl: {
+      type: String,
+      trim: true,
+    },
     barcode: {
       type: String,
       unique: true,
-      sparse: true, // Allow null
+      sparse: true,
     },
     quantity: {
       type: Number,
       required: true,
       min: 0,
+      default: 0,
     },
     lowStockThreshold: {
       type: Number,

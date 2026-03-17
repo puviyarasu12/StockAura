@@ -1,9 +1,33 @@
 const Product = require("../models/Product");
 const InventoryLog = require("../models/InventoryLog");
+const { cloudinary, ensureCloudinaryConfig } = require("../config/cloudinary");
+
+const uploadImageToCloudinary = async (fileBuffer) => {
+  ensureCloudinaryConfig();
+
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "inventory-products",
+        resource_type: "image",
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(result);
+      }
+    );
+
+    stream.end(fileBuffer);
+  });
+};
 
 const createProduct = async (req, res) => {
   try {
     const { name, description, category, supplier, barcode, quantity, lowStockThreshold, expiryDate, price } = req.body;
+    const imageFile = req.file;
 
     if (!name || !category || !supplier || quantity === undefined || !price) {
       return res.status(400).json({ message: "Name, category, supplier, quantity, and price are required" });
@@ -16,6 +40,12 @@ const createProduct = async (req, res) => {
       }
     }
 
+    let imageUrl = null;
+    if (imageFile) {
+      const uploadResult = await uploadImageToCloudinary(imageFile.buffer);
+      imageUrl = uploadResult.secure_url;
+    }
+
     const product = await Product.create({
       name,
       description,
@@ -26,6 +56,7 @@ const createProduct = async (req, res) => {
       lowStockThreshold: lowStockThreshold || 10,
       expiryDate,
       price,
+      imageUrl,
     });
 
     await product.populate(["category", "supplier"]);
@@ -35,13 +66,16 @@ const createProduct = async (req, res) => {
       product,
     });
   } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ message: "Product barcode already exists" });
+    }
     return res.status(500).json({ message: error.message });
   }
 };
 
 const getAllProducts = async (req, res) => {
   try {
-    const products = await Product.find().populate(["category", "supplier"]);
+    const products = await Product.find().populate(["category", "supplier"]).sort({ createdAt: -1 });
 
     return res.status(200).json({
       message: "Products fetched successfully",
@@ -74,6 +108,7 @@ const updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, description, quantity, lowStockThreshold, expiryDate, price } = req.body;
+    const imageFile = req.file;
 
     const product = await Product.findById(id);
     if (!product) {
@@ -87,6 +122,11 @@ const updateProduct = async (req, res) => {
     if (expiryDate) product.expiryDate = expiryDate;
     if (price) product.price = price;
 
+    if (imageFile) {
+      const uploadResult = await uploadImageToCloudinary(imageFile.buffer);
+      product.imageUrl = uploadResult.secure_url;
+    }
+
     await product.save();
     await product.populate(["category", "supplier"]);
 
@@ -95,6 +135,9 @@ const updateProduct = async (req, res) => {
       product,
     });
   } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ message: "Product barcode already exists" });
+    }
     return res.status(500).json({ message: error.message });
   }
 };
