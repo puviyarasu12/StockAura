@@ -30,6 +30,14 @@ const productSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
+    barcodeImagePath: {
+      type: String,
+      trim: true,
+    },
+    barcodeImageUrl: {
+      type: String,
+      trim: true,
+    },
     quantity: {
       type: Number,
       required: true,

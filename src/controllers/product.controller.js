@@ -1,14 +1,40 @@
 const Product = require("../models/Product");
 const InventoryLog = require("../models/InventoryLog");
 const { cloudinary, ensureCloudinaryConfig } = require("../config/cloudinary");
+const bwipjs = require("bwip-js");
 
-const uploadImageToCloudinary = async (fileBuffer) => {
+const randomDigits = (length) => {
+  let digits = "";
+  for (let index = 0; index < length; index += 1) {
+    const min = index === 0 ? 1 : 0;
+    digits += String(Math.floor(Math.random() * (10 - min)) + min);
+  }
+  return digits;
+};
+
+const generateUniqueBarcode = async () => {
+  const maxAttempts = 25;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const length = Math.random() < 0.5 ? 12 : 13;
+    const barcode = randomDigits(length);
+    const existing = await Product.findOne({ barcode }).select("_id");
+    if (!existing) {
+      return barcode;
+    }
+  }
+
+  throw new Error("Unable to generate a unique barcode. Please try again.");
+};
+
+const uploadBufferToCloudinary = async (fileBuffer, folder, publicId) => {
   ensureCloudinaryConfig();
 
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
-        folder: "inventory-products",
+        folder,
+        public_id: publicId,
         resource_type: "image",
       },
       (error, result) => {
@@ -24,6 +50,30 @@ const uploadImageToCloudinary = async (fileBuffer) => {
   });
 };
 
+const generateBarcodeImageUrl = async (barcode) => {
+  const pngBuffer = await bwipjs.toBuffer({
+    bcid: "code128",
+    text: barcode,
+    scale: 3,
+    height: 12,
+    includetext: true,
+    textxalign: "center",
+    backgroundcolor: "FFFFFF",
+  });
+
+  const uploadResult = await uploadBufferToCloudinary(
+    pngBuffer,
+    "inventory-barcodes",
+    `barcode-${barcode}-${Date.now()}`
+  );
+
+  return uploadResult.secure_url;
+};
+
+const uploadImageToCloudinary = async (fileBuffer) => {
+  return uploadBufferToCloudinary(fileBuffer, "inventory-products");
+};
+
 const createProduct = async (req, res) => {
   try {
     if (!req.body || typeof req.body !== 'object') {
@@ -32,16 +82,21 @@ const createProduct = async (req, res) => {
     const { name, description, category, supplier, barcode, quantity, lowStockThreshold, expiryDate, price } = req.body;
     const imageFile = req.file;
 
-    if (!name || !category || !supplier || quantity === undefined || !price) {
+    if (!name || !category || !supplier || quantity === undefined || price === undefined) {
       return res.status(400).json({ message: "Name, category, supplier, quantity, and price are required" });
     }
 
-    if (barcode) {
-      const existingProduct = await Product.findOne({ barcode });
-      if (existingProduct) {
-        return res.status(409).json({ message: "Product with this barcode already exists" });
-      }
+    let finalBarcode = barcode;
+    if (!finalBarcode) {
+      finalBarcode = await generateUniqueBarcode();
     }
+
+    const existingProduct = await Product.findOne({ barcode: finalBarcode });
+    if (existingProduct) {
+      return res.status(409).json({ message: "Product with this barcode already exists" });
+    }
+
+    const barcodeImageUrl = await generateBarcodeImageUrl(finalBarcode);
 
     let imageUrl = null;
     if (imageFile) {
@@ -54,7 +109,9 @@ const createProduct = async (req, res) => {
       description,
       category,
       supplier,
-      barcode,
+      barcode: finalBarcode,
+      barcodeImagePath: barcodeImageUrl,
+      barcodeImageUrl,
       quantity,
       lowStockThreshold: lowStockThreshold || 10,
       expiryDate,
