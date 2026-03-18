@@ -14,13 +14,13 @@ const { upload } = require("../middleware/upload.middleware");
 
 const router = express.Router();
 
-router.post("/", protect, authorize("admin"), upload.single("image"), createProduct);
+router.post("/", protect, upload.single("image"), createProduct);
 router.get("/", getAllProducts);
 router.get("/low-stock", protect, getLowStockProducts);
 router.get("/barcode/:barcode", getProductByBarcode);
 router.get("/:id", getProductById);
-router.put("/:id", protect, authorize("admin"), upload.single("image"), updateProduct);
+router.put("/:id", protect, upload.single("image"), updateProduct);
 router.put("/:id/stock", protect, updateStock);
-router.delete("/:id", protect, authorize("admin"), deleteProduct);
+router.delete("/:id", protect, deleteProduct);
 
 module.exports = router;
