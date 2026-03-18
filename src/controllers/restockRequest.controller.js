@@ -32,13 +32,10 @@ const createRestockRequest = async (req, res) => {
   try {
     const { productId, requestedQty, notes = "", sendEmail: sendEmailFlag } = req.body || {};
 
-    if (!productId || !requestedQty) {
-      return res.status(400).json({ message: "productId and requestedQty are required" });
-    }
+    console.log("Restock request payload:", { productId, requestedQty, notes, sendEmailFlag: !!sendEmailFlag });
 
-    const qty = Number(requestedQty);
-    if (isNaN(qty) || qty <= 0) {
-      return res.status(400).json({ message: "requestedQty must be a positive number" });
+    if (!productId) {
+      return res.status(400).json({ message: "productId is required" });
     }
 
     const product = await Product.findById(productId).populate("supplier");
@@ -46,6 +43,13 @@ const createRestockRequest = async (req, res) => {
     if (!product.supplier) return res.status(400).json({ message: "Product has no supplier assigned" });
 
     const supplier = product.supplier;
+    console.log("Found product:", product.name, "supplier:", supplier.name, "email:", supplier.contactEmail || "missing");
+
+    let qty = Number(requestedQty);
+    if (isNaN(qty) || qty <= 0) {
+      qty = Math.max(product.lowStockThreshold * 2, product.quantity + 10);
+      console.log("Used default suggested qty:", qty);
+    }
 
     // Create the draft first
     let requestDoc = await RestockRequest.create({
@@ -58,32 +62,39 @@ const createRestockRequest = async (req, res) => {
     });
 
     if (Boolean(sendEmailFlag)) {
-      if (!supplier.contactEmail) {
-        return res.status(400).json({ message: "Supplier email missing. Update in Supplier Management." });
+      try {
+        if (!supplier.contactEmail) {
+          console.warn(`Supplier missing contactEmail: ${supplier.name}`);
+        } else {
+          const adminNotify = process.env.ADMIN_NOTIFY_EMAIL || "puviarasu787@gmail.com";
+          const mailBody = buildRestockEmail({
+            supplierName: supplier.name,
+            productName: product.name,
+            barcode: product.barcode,
+            requestedQty: qty,
+            notes: String(notes || ""),
+          });
+
+          console.log("Sending email to:", supplier.contactEmail);
+          // Attempt to send mail
+          await sendMail({
+            to: supplier.contactEmail,
+            cc: adminNotify,
+            subject: mailBody.subject,
+            text: mailBody.text,
+          });
+
+          // Update status only if mail succeeds
+          requestDoc.status = "requested";
+          requestDoc.emailedTo = supplier.contactEmail;
+          requestDoc.emailedAt = new Date();
+          await requestDoc.save();
+          console.log("Email sent successfully, status updated to requested");
+        }
+      } catch (mailError) {
+        console.error("Failed to send restock email:", mailError.message);
+        // Keep as draft, don't fail the request
       }
-
-      const adminNotify = process.env.ADMIN_NOTIFY_EMAIL || "puviarasu787@gmail.com";
-      const mailBody = buildRestockEmail({
-        supplierName: supplier.name,
-        productName: product.name,
-        barcode: product.barcode,
-        requestedQty: qty,
-        notes: String(notes || ""),
-      });
-
-      // Attempt to send mail
-      await sendMail({
-        to: supplier.contactEmail,
-        cc: adminNotify,
-        subject: mailBody.subject,
-        text: mailBody.text,
-      });
-
-      // Update status only if mail succeeds
-      requestDoc.status = "requested";
-      requestDoc.emailedTo = supplier.contactEmail;
-      requestDoc.emailedAt = new Date();
-      await requestDoc.save();
     }
 
     await populateRestockRequest(requestDoc);
@@ -93,8 +104,8 @@ const createRestockRequest = async (req, res) => {
       restockRequest: requestDoc,
     });
   } catch (error) {
-    console.error("RESTOCK_ERROR:", error);
-    return res.status(500).json({ message: error.message });
+    console.error("RESTOCK_REQUEST_CREATE_ERROR:", error);
+    return res.status(500).json({ message: "Failed to create restock request: " + error.message });
   }
 };
 
